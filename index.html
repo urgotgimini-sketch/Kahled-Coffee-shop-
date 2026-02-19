@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LabelGuard AI</title>
+
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Lucide Icons (Vanilla) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- SheetJS (XLSX) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- jsPDF & AutoTable -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-100 text-slate-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- Icon Components ---
+    const LucideIcon = ({ name, size = 24, className, ...props }) => {
+      const iconData = lucide.icons[name] || lucide.icons[name.charAt(0).toLowerCase() + name.slice(1)];
+
+      if (!iconData) {
+        console.warn(`Icon ${name} not found in lucide.icons`);
+        return null;
+      }
+
+      return (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={className}
+          {...props}
+        >
+          {iconData.map(([tag, attrs], index) => (
+            React.createElement(tag, { ...attrs, key: index })
+          ))}
+        </svg>
+      );
+    };
+
+    // Define specific icons used in the app
+    const Upload = (props) => <LucideIcon name="Upload" {...props} />;
+    const FileSpreadsheet = (props) => <LucideIcon name="FileSpreadsheet" {...props} />;
+    const ScanLine = (props) => <LucideIcon name="ScanLine" {...props} />;
+    const AlertTriangle = (props) => <LucideIcon name="AlertTriangle" {...props} />;
+    const CheckCircle = (props) => <LucideIcon name="CheckCircle" {...props} />;
+    const History = (props) => <LucideIcon name="History" {...props} />;
+    const Download = (props) => <LucideIcon name="Download" {...props} />;
+    const Settings = (props) => <LucideIcon name="Settings" {...props} />;
+    const Loader2 = (props) => <LucideIcon name="Loader2" {...props} />;
+    const Search = (props) => <LucideIcon name="Search" {...props} />;
+    const X = (props) => <LucideIcon name="X" {...props} />;
+    const Database = (props) => <LucideIcon name="Database" {...props} />;
+    const Camera = (props) => <LucideIcon name="Camera" {...props} />;
+    const Layers = (props) => <LucideIcon name="Layers" {...props} />;
+    const FileText = (props) => <LucideIcon name="FileText" {...props} />;
+    const ChevronRight = (props) => <LucideIcon name="ChevronRight" {...props} />;
+    const List = (props) => <LucideIcon name="List" {...props} />;
+    const ArrowRight = (props) => <LucideIcon name="ArrowRight" {...props} />;
+
+    // Global API Key definition
+    // Hardcoded API Keys & Key Rotation Logic
+    const API_KEYS = [
+      "AIzaSyCw6pOX_5PyQgd_fLM1wRk9voJcoLcCcV8",
+      "AIzaSyBqvESQNovAqSIRcVtjdOxvL00i6Y2uTpA",
+      "AIzaSyAy8n3yUKbAZJGCVXOvorSblZoBrJq4C3s",
+      "AIzaSyCw6pOX_5PyQgd_fLM1wRk9voJcoLcCcV8",
+      "AIzaSyBaTZO79zn28LY01to13JiIsFu9F-v5l04",
+      "AIzaSyBqZRmEFh0HJwKa43nX6RG1cSVqHVEzA5k"
+    ];
+
+    let currentKeyIndex = Math.floor(Math.random() * API_KEYS.length);
+
+    const getNextKey = () => {
+      currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
+      return API_KEYS[currentKeyIndex];
+    };
+
+    const getCurrentKey = () => API_KEYS[currentKeyIndex];
+
+    const EXPECTED_FIELDS = ['productName', 'productionDate', 'expiryDate', 'batchNumber', 'netWeight'];
+    const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    // --- DATE PARSING LOGIC ---
+    const parseDate = (dateStr) => {
+      if (!dateStr) return null;
+      let cleanStr = String(dateStr).trim();
+      if (!cleanStr) return null;
+      cleanStr = cleanStr.split(' ')[0]; // Remove time
+
+      // 1. Textual Month Match
+      const textMatch = cleanStr.match(/^(\d{1,2})[\s\/\-.]+([a-zA-Z]{3,})[\s\/\-.]+(\d{2,4})$/);
+      if (textMatch) {
+        const d = parseInt(textMatch[1]);
+        const mStr = textMatch[2].substring(0, 3);
+        let y = parseInt(textMatch[3]);
+        if (y < 100) y += 2000;
+
+        const mIndex = MONTHS_SHORT.findIndex(m => m.toLowerCase() === mStr.toLowerCase());
+        if (mIndex > -1) {
+          return `${String(d).padStart(2, '0')}-${MONTHS_SHORT[mIndex]}-${y}`;
+        }
+      }
+
+      // 2. Numeric Match
+      const parts = cleanStr.split(/[\/\-.]/).filter(p => p.trim().length > 0);
+      if (parts.length === 3) {
+        let d, m, y;
+        let p1 = parseInt(parts[0]);
+        let p2 = parseInt(parts[1]);
+        let p3 = parseInt(parts[2]);
+
+        if (String(parts[0]).length === 4) {
+          y = p1; m = p2; d = p3;
+        } else {
+          y = p3;
+          if (y < 100) y += 2000;
+
+          const a = p1;
+          const b = p2;
+
+          // Ambiguity Logic (Current Month Rule)
+          if (a > 12) { d = a; m = b; }
+          else if (b > 12) { d = b; m = a; }
+          else {
+            const today = new Date();
+            const currentMonth = today.getMonth() + 1;
+            if (b === currentMonth) { d = a; m = b; }
+            else if (a === currentMonth) { d = b; m = a; }
+            else { d = a; m = b; }
+          }
+        }
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          return `${String(d).padStart(2, '0')}-${MONTHS_SHORT[m - 1]}-${y}`;
+        }
+      }
+      return cleanStr;
+    };
+
+    const processRowData = (rows) => {
+      return rows.map((row, index) => {
+        let values = Array.isArray(row) ? row : Object.values(row);
+        if (values.length < 3) return null;
+
+        const weight = String(values[0] || '').trim();
+        const nameAr = String(values[1] || '').trim();
+        const nameEn = String(values[2] || '').trim();
+        const itemCode = String(values[3] || '').trim();
+        const julian = String(values[4] || '').trim();
+        const supplier = String(values[5] || '').trim();
+        const grn = String(values[6] || '').trim();
+
+        const rawProdDate = String(values[7] || '').trim();
+        const rawExpDate = String(values[8] || '').trim();
+
+        const prodDate = parseDate(rawProdDate) || rawProdDate;
+        const expDate = parseDate(rawExpDate) || rawExpDate;
+
+        // Construct Batch Number: Product Code + Julian + Supplier + GRN
+        // e.g. 25 + 36 + dm + 3 => 2536dm3 (normalized for comparison)
+        const batchNumber = `${itemCode}${julian}${supplier}${grn}`.replace(/\s+/g, '').toLowerCase();
+
+        return {
+          productNameEn: nameEn,
+          productNameAr: nameAr,
+          productionDate: prodDate,
+          expiryDate: expDate,
+          batchNumber: batchNumber,
+          itemCode: itemCode,
+          netWeight: weight,
+          id: `prod-${index}-${Math.random().toString(36).substr(2, 5)}` // Unique ID for each master row
+        };
+      }).filter(item => item !== null && (item.productNameEn || item.productNameAr));
+    };
+
+    // --- COMPONENTS (Moved outside main app to prevent re-renders) ---
+
+    const Navbar = ({ selectedDate, setSelectedDate, activeTab, setActiveTab }) => (
+      <div className="bg-emerald-900 text-white p-4 flex justify-between items-center shadow-lg sticky top-0 z-50">
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
+          <ScanLine className="w-8 h-8 text-emerald-400" />
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">LabelGuard AI</h1>
+            <p className="text-xs text-emerald-300">Bilingual Verification System</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center bg-emerald-800 rounded-lg px-2 overflow-hidden border border-emerald-700">
+            <div className="px-2 text-emerald-200">
+              <Database size={14} />
+            </div>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="bg-emerald-800 text-white border-none outline-none py-1 px-2 text-sm focus:ring-0"
+            />
+          </div>
+        </div>
+      </div>
+    );
+
+    const Dashboard = ({ scans, masterData, selectedDate, config, setConfig, userApiKey, setUserApiKey, downloadReport, downloadFullHistory }) => {
+      const todayScans = scans.filter(s => s.timestamp.startsWith(selectedDate));
+      const errors = todayScans.filter(s => s.status === 'Mismatch' || s.status === 'Unknown Product').length;
+
+      return (
+        <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+            <h3 className="text-slate-500 text-sm font-medium">Total Scans (Today)</h3>
+            <p className="text-4xl font-bold text-slate-800 mt-2">{todayScans.length}</p>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+            <h3 className="text-slate-500 text-sm font-medium">Discrepancies Found</h3>
+            <p className={`text-4xl font-bold mt-2 ${errors > 0 ? 'text-red-500' : 'text-emerald-500'}`}>{errors}</p>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+            <h3 className="text-slate-500 text-sm font-medium">Master Records</h3>
+            <p className="text-4xl font-bold text-slate-800 mt-2">{(masterData[selectedDate] || []).length}</p>
+          </div>
+
+          {/* Actions Area */}
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex gap-3 items-center justify-between">
+              <div className="flex gap-3 items-center">
+                <div className="bg-white p-2 rounded-full text-slate-600 shadow-sm">
+                  <FileText size={20} />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-slate-800">Daily Report</h4>
+                  <p className="text-xs text-slate-500">Download PDF for {selectedDate}</p>
+                </div>
+              </div>
+              <button onClick={downloadReport} className="px-4 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 flex items-center gap-2 shadow-sm active:scale-95 transition-transform">
+                <Download size={16} /> PDF
+              </button>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex gap-3 items-center justify-between">
+              <div className="flex gap-3 items-center">
+                <div className="bg-white p-2 rounded-full text-slate-600 shadow-sm">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-slate-800">Full History</h4>
+                  <p className="text-xs text-slate-500">All saved records ({scans.length})</p>
+                </div>
+              </div>
+              <button onClick={downloadFullHistory} className="px-4 py-2 bg-white border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50 flex items-center gap-2 shadow-sm active:scale-95 transition-transform">
+                <Database size={16} /> Export
+              </button>
+            </div>
+          </div>
+
+          {/* Configuration / Settings Panel */}
+          <div className="md:col-span-3 bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 border-b pb-2">
+              <Settings size={18} /> Application Settings
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">App Title</label>
+                  <input
+                    className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={config.title}
+                    onChange={(e) => setConfig({ ...config, title: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Subtitle</label>
+                  <input
+                    className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={config.subtitle}
+                    onChange={(e) => setConfig({ ...config, subtitle: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Override API Key (Optional)</label>
+                  <input
+                    type="password"
+                    className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="Enter custom Google API Key"
+                    value={userApiKey}
+                    onChange={(e) => setUserApiKey(e.target.value)}
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Leave empty to use built-in rotating keys.</p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Column: Product</label>
+                  <input
+                    className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={config.colProduct}
+                    onChange={(e) => setConfig({ ...config, colProduct: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Column: Batch</label>
+                  <input
+                    className="w-full border border-slate-300 rounded p-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={config.colBatch}
+                    onChange={(e) => setConfig({ ...config, colBatch: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 text-xs text-slate-500 bg-slate-50 p-3 rounded border border-slate-100 italic">
+              All settings are automatically saved to your browser's local storage.
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const MasterDataView = ({ masterData, selectedDate, loadSampleMasterData, handleFileUpload, uploadError, config }) => (
+      <div className="p-6 max-w-6xl mx-auto animate-fade-in">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-slate-800">{config.title} - Master Data</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={loadSampleMasterData}
+              className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors border border-slate-200"
+            >
+              Load Sample Data
+            </button>
+            <label className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer transition-colors shadow-sm active:scale-95">
+              <Upload size={18} />
+              <span>Upload Table Image (Excel)</span>
+              <input
+                type="file"
+                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          </div>
+        </div>
+
+        {uploadError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 text-red-800 animate-pulse">
+            <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+            <div>
+              <h4 className="font-semibold text-sm">Upload Issue</h4>
+              <p className="text-sm">{uploadError}</p>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
+          {(!masterData[selectedDate] || masterData[selectedDate].length === 0) ? (
+            <div className="p-12 text-center text-slate-400">
+              <FileSpreadsheet className="w-16 h-16 mx-auto mb-4 opacity-20" />
+              <p>No master data loaded for {selectedDate}</p>
+              <p className="text-sm mt-2">Upload the Daily Excel File to begin.</p>
+            </div>
+          ) : (
+            <table className="w-full text-sm text-left whitespace-nowrap">
+              <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-3">{config.colProduct} (En)</th>
+                  <th className="px-6 py-3 text-right font-sans">{config.colProduct} (Ar)</th>
+                  <th className="px-6 py-3">{config.colBatch}</th>
+                  <th className="px-6 py-3">{config.colProdDate}</th>
+                  <th className="px-6 py-3">{config.colExpDate}</th>
+                  <th className="px-6 py-3">{config.colWeight}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {masterData[selectedDate].map((row) => (
+                  <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-3 font-medium text-slate-800">{row.productNameEn}</td>
+                    <td className="px-6 py-3 text-right font-medium text-slate-800">{row.productNameAr}</td>
+                    <td className="px-6 py-3 font-mono text-slate-600 bg-slate-50">{row.batchNumber}</td>
+                    <td className="px-6 py-3 text-slate-600 font-mono">{row.productionDate}</td>
+                    <td className="px-6 py-3 text-slate-600 font-mono">{row.expiryDate}</td>
+                    <td className="px-6 py-3 text-slate-600">{row.netWeight}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+
+    const VerifyView = ({ scans, masterData, selectedDate, activeProductTabId, setActiveProductTabId, isProcessing, processingCount, handleImagesUploadForTab, errorMsg, config }) => {
+      const fileInputRef = useRef(null);
+      const dailyRecords = masterData[selectedDate] || [];
+
+      // Select first product by default if none selected
+      useEffect(() => {
+        if (dailyRecords.length > 0 && !activeProductTabId) {
+          setActiveProductTabId(dailyRecords[0].id);
+        }
+      }, [dailyRecords, activeProductTabId, setActiveProductTabId]);
+
+      const activeRecord = dailyRecords.find(r => r.id === activeProductTabId);
+
+      // Filter scans for current active product tab
+      const productScans = scans.filter(s => s.targetProductId === activeProductTabId);
+
+      if (dailyRecords.length === 0) {
+        return (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8">
+            <Database className="w-16 h-16 mb-4 opacity-20" />
+            <h3 className="text-xl font-semibold text-slate-600">No Master Data Found</h3>
+            <p className="mt-2">Upload the daily Excel file in the "Master Data" tab to generate product upload tabs.</p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="flex h-[calc(100vh-100px)] bg-slate-100 p-4 gap-4 animate-fade-in">
+          {/* LEFT: Product Tabs */}
+          <div className="w-1/4 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-slate-100 bg-slate-50 font-semibold text-slate-700 flex items-center gap-2 sticky top-0 bg-slate-50 z-10">
+              <List size={18} /> Products ({dailyRecords.length})
+            </div>
+            <div className="overflow-y-auto flex-1">
+              {dailyRecords.map(record => {
+                const hasScans = scans.some(s => s.targetProductId === record.id);
+                const hasErrors = scans.some(s => s.targetProductId === record.id && s.status === 'Mismatch');
+                const isSelected = activeProductTabId === record.id;
+
+                return (
+                  <div
+                    key={record.id}
+                    onClick={() => setActiveProductTabId(record.id)}
+                    className={`p-4 border-b border-slate-100 cursor-pointer transition-all hover:bg-slate-50 relative ${isSelected ? 'bg-blue-50 border-l-4 border-l-blue-500' : 'border-l-4 border-l-transparent'
+                      }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="font-medium text-sm text-slate-800 line-clamp-2">{record.productNameEn}</div>
+                      {hasScans && (
+                        hasErrors
+                          ? <AlertTriangle size={16} className="text-red-500 shrink-0" />
+                          : <CheckCircle size={16} className="text-emerald-500 shrink-0" />
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1 truncate">{record.productNameAr}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* RIGHT: Active Product Workspace */}
+          <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+            {activeRecord ? (
+              <>
+                {/* Header: Product Details */}
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex-shrink-0">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-800">{activeRecord.productNameEn}</h2>
+                      <p className="text-sm text-slate-500">{activeRecord.productNameAr}</p>
+                    </div>
+                    <div className="text-right text-xs text-slate-400 font-mono">
+                      ID: {activeRecord.itemCode || 'N/A'} <br />
+                      Batch: {activeRecord.batchNumber}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-4 gap-4 text-sm border-t border-slate-100 pt-4">
+                    <div>
+                      <span className="block text-slate-400 text-xs">{config.colProdDate}</span>
+                      <span className="font-medium">{activeRecord.productionDate}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-400 text-xs">{config.colExpDate}</span>
+                      <span className="font-medium">{activeRecord.expiryDate}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-400 text-xs">{config.colWeight}</span>
+                      <span className="font-medium">{activeRecord.netWeight}</span>
+                    </div>
+                    <div>
+                      <span className="block text-slate-400 text-xs">{config.colBatch}</span>
+                      <span className="font-medium">{activeRecord.batchNumber}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Upload Area */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col items-center justify-center flex-shrink-0">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleImagesUploadForTab(e, activeRecord)}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current.click()}
+                    disabled={isProcessing}
+                    className="flex items-center gap-3 px-8 py-4 bg-emerald-600 text-white rounded-lg shadow-md hover:bg-emerald-700 transition-transform active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:transform-none"
+                  >
+                    {isProcessing ? <Loader2 className="animate-spin" /> : <Upload size={24} />}
+                    <span className="font-bold text-lg">
+                      {isProcessing ? `Analyzing (${processingCount})...` : 'Upload Labels for Verification'}
+                    </span>
+                  </button>
+                  <p className="mt-2 text-xs text-slate-400">
+                    Upload labels specifically for <strong>{activeRecord.productNameEn}</strong>.
+                  </p>
+                  {errorMsg && (
+                    <div className="mt-4 w-full p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm text-left animate-fade-in">
+                      <p className="font-bold flex items-center gap-2 mb-2">
+                        <AlertTriangle size={16} /> Analysis Issues:
+                      </p>
+                      <ul className="list-disc pl-5 space-y-1 text-xs">
+                        {errorMsg.split('|').map((e, i) => (
+                          <li key={i}>{e.trim()}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                {/* Results / Scans List for this Product */}
+                <div className="flex-1 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                  <div className="p-3 border-b border-slate-100 bg-slate-50 font-semibold text-slate-700 text-sm sticky top-0">
+                    Results for {activeRecord.productNameEn}
+                  </div>
+                  <div className="overflow-y-auto flex-1 p-4 space-y-4">
+                    {productScans.length === 0 ? (
+                      <div className="text-center text-slate-400 py-10">
+                        <ScanLine className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                        <p>No labels uploaded for this product yet.</p>
+                      </div>
+                    ) : (
+                      productScans.map(scan => (
+                        <div key={scan.id} className="border border-slate-200 rounded-lg overflow-hidden animate-fade-in-up">
+                          <div className={`p-3 flex justify-between items-center ${scan.status === 'Valid' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'
+                            }`}>
+                            <div className="flex items-center gap-2">
+                              {scan.status === 'Valid' ? <CheckCircle size={18} /> : <AlertTriangle size={18} />}
+                              <span className="font-bold text-sm">{scan.imageName}</span>
+                            </div>
+                            <span className="text-xs font-mono opacity-70">{new Date(scan.timestamp).toLocaleTimeString()}</span>
+                          </div>
+
+                          {/* Comparison Report Table */}
+                          <div className="p-4 bg-white text-sm border-t border-slate-100">
+                            <table className="w-full text-left text-xs">
+                              <thead className="text-slate-500 font-medium bg-slate-50">
+                                <tr>
+                                  <th className="px-3 py-2">Field</th>
+                                  <th className="px-3 py-2">Master Data (Expected)</th>
+                                  <th className="px-3 py-2">Label (Detected)</th>
+                                  <th className="px-3 py-2 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {EXPECTED_FIELDS.map(field => {
+                                  const discrepancy = scan.discrepancies.find(d => d.field === field);
+                                  const expected = activeRecord[field];
+                                  const detected = scan.extracted[field];
+
+                                  let expectedDisplay = expected;
+                                  if (field === 'productName') {
+                                    expectedDisplay = `${activeRecord.productNameEn} / ${activeRecord.productNameAr}`;
+                                  }
+
+                                  // Logic: No Red/Green for ProductName, just "Captured"
+                                  let statusCell;
+                                  if (field === 'productName') {
+                                    statusCell = (
+                                      <span className="inline-flex items-center justify-center px-2 py-1 rounded text-slate-500 bg-slate-100 text-[10px] font-medium">
+                                        Captured
+                                      </span>
+                                    );
+                                  } else {
+                                    statusCell = discrepancy ? (
+                                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600">
+                                        <X size={14} />
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-600">
+                                        <CheckCircle size={14} />
+                                      </span>
+                                    );
+                                  }
+
+                                  return (
+                                    <tr key={field} className={discrepancy ? 'bg-red-50/50' : ''}>
+                                      <td className="px-3 py-2 font-medium text-slate-700 capitalize">
+                                        {field.replace(/([A-Z])/g, ' $1').trim()}
+                                      </td>
+                                      <td className="px-3 py-2 text-slate-600 truncate max-w-[150px]" title={expectedDisplay}>
+                                        {expectedDisplay || '-'}
+                                      </td>
+                                      <td className={`px-3 py-2 truncate max-w-[150px] ${discrepancy ? 'text-red-600 font-bold' : 'text-slate-600'}`} title={detected}>
+                                        {detected || 'Not Detected'}
+                                      </td>
+                                      <td className="px-3 py-2 text-center">
+                                        {statusCell}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-full text-slate-400">
+                <p>Select a product tab to begin.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const ReportsView = ({ scans, masterData, selectedDate, config }) => {
+      // Updated CSV Export to reflect new tab structure data if needed, mostly compatible
+      const exportCSV = () => {
+        const headers = ["Timestamp", "Image", "Target Product Tab", "Status", "Errors"];
+        const rows = scans.map(s => {
+          // Find product name linked to this scan target ID
+          const productRecord = masterData[selectedDate]?.find(m => m.id === s.targetProductId);
+          const productName = productRecord ? productRecord.productNameEn : "Unknown/Deleted";
+
+          return [
+            s.timestamp,
+            s.imageName,
+            productName,
+            s.status,
+            s.discrepancies.map(d => `${d.field}: ${d.actual} != ${d.expected}`).join(' | ')
+          ];
+        });
+
+        const csvContent = "data:text/csv;charset=utf-8,"
+          + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `verification_audit_${selectedDate}.csv`);
+        document.body.appendChild(link);
+        link.click();
+      };
+
+      return (
+        <div className="p-6 max-w-6xl mx-auto animate-fade-in">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-slate-800">Audit Report</h2>
+            <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors shadow-sm active:scale-95">
+              <Download size={16} /> Export CSV
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-3">Time</th>
+                  <th className="px-6 py-3">Target Tab</th>
+                  <th className="px-6 py-3">Status</th>
+                  <th className="px-6 py-3">Discrepancies</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {scans.map((scan) => {
+                  const productRecord = masterData[selectedDate]?.find(m => m.id === scan.targetProductId);
+                  const productName = productRecord ? productRecord.productNameEn : "Unknown";
+
+                  return (
+                    <tr key={scan.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-3 text-slate-600">
+                        {new Date(scan.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td className="px-6 py-3 font-medium text-slate-800">
+                        {productName}
+                      </td>
+                      <td className="px-6 py-3">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${scan.status === 'Valid'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-red-100 text-red-700'
+                          }`}>
+                          {scan.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3 text-red-600 text-xs font-mono">
+                        {scan.discrepancies.length > 0
+                          ? scan.discrepancies.map(d => d.field).join(', ')
+                          : '-'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )
+    };
+
+    // --- MAIN APP COMPONENT ---
+
+    const FoodLabelVerifier = () => {
+      // --- State Management ---
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+      // Persistence: Initialize from LocalStorage
+      const [masterData, setMasterData] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('masterData')) || {}; } catch { return {}; }
+      });
+      const [scans, setScans] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('scans')) || []; } catch { return []; }
+      });
+      const [config, setConfig] = useState(() => {
+        try {
+          return JSON.parse(localStorage.getItem('appConfig')) || {
+            title: "LabelGuard AI",
+            subtitle: "Food Label Verifier",
+            colProduct: "Product Name",
+            colBatch: "Batch #",
+            colProdDate: "Prod. Date",
+            colExpDate: "Expiry Date",
+            colWeight: "Net Weight"
+          };
+        } catch { return {}; }
+      });
+
+      // New: Track the currently selected product tab ID for verification
+      const [activeProductTabId, setActiveProductTabId] = useState(null);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const [processingCount, setProcessingCount] = useState(0);
+      const [userApiKey, setUserApiKey] = useState('');
+      const [errorMsg, setErrorMsg] = useState(null);
+      const [uploadError, setUploadError] = useState(null);
+      const [libLoaded, setLibLoaded] = useState(false);
+
+      // --- Lifecycle Hooks ---
+
+      // Inject SheetJS library for parsing Excel files
+      useEffect(() => {
+        if (window.XLSX) {
+          setLibLoaded(true);
+        }
+      }, []);
+
+      // Persistence Effects
+      useEffect(() => { localStorage.setItem('masterData', JSON.stringify(masterData)); }, [masterData]);
+      useEffect(() => { localStorage.setItem('scans', JSON.stringify(scans)); }, [scans]);
+      useEffect(() => { localStorage.setItem('appConfig', JSON.stringify(config)); }, [config]);
+      useEffect(() => { document.title = config.title; }, [config]);
+
+      // --- Helper Functions ---
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploadError(null);
+
+        const readFile = (f) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              // Determine parsing method based on extension
+              let dataRows = [];
+              if (f.name.endsWith('.xlsx') || f.name.endsWith('.xls')) {
+                const data = new Uint8Array(event.target.result);
+                const workbook = window.XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, defval: "" });
+                if (jsonData.length < 2) throw new Error("Empty Excel file");
+                dataRows = jsonData.slice(1);
+              } else {
+                const text = new TextDecoder().decode(event.target.result); // For CSV
+                const lines = text.split(/\r?\n/);
+                if (lines.length < 2) throw new Error("Empty CSV file");
+                dataRows = lines.slice(1).filter(l => l.trim()).map(l => l.split(','));
+              }
+
+              const parsedData = processRowData(dataRows);
+              if (parsedData.length === 0) {
+                setUploadError("No valid data rows found.");
+                return;
+              }
+
+              setMasterData(prev => ({ ...prev, [selectedDate]: parsedData }));
+            } catch (err) {
+              console.error(err);
+              setUploadError("Failed to parse file. Ensure format matches the template.");
+            }
+          };
+
+          if (f.name.endsWith('.xlsx') || f.name.endsWith('.xls')) {
+            reader.readAsArrayBuffer(f);
+          } else {
+            reader.readAsArrayBuffer(f); // Using ArrayBuffer then decode for CSV to handle UTF8 better
+          }
+        };
+
+        if ((file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) && (!libLoaded || !window.XLSX)) {
+          setUploadError("Excel parser loading...");
+          setTimeout(() => readFile(file), 1000);
+        } else {
+          readFile(file);
+        }
+      };
+
+      const loadSampleMasterData = () => {
+        const sample = [
+          {
+            productNameEn: 'Sh.Lettuce',
+            productNameAr: 'خس - (ماك + مبيعات)',
+            productionDate: parseDate('2/5/2026'),
+            expiryDate: parseDate('2/11/2026'),
+            batchNumber: '0135dm10',
+            itemCode: '01',
+            netWeight: '1000',
+            id: '1'
+          },
+          {
+            productNameEn: 'Tomato',
+            productNameAr: 'بندورة - (ماك)',
+            productionDate: parseDate('05-02-2026'),
+            expiryDate: parseDate('11-Feb-2026'),
+            batchNumber: '1135dm11',
+            itemCode: '11',
+            netWeight: '1000',
+            id: '2'
+          },
+          {
+            productNameEn: 'Example Product',
+            productNameAr: 'مثال',
+            productionDate: parseDate('2/5/2026'),
+            expiryDate: parseDate('2/11/2026'),
+            batchNumber: '2536dm3', // Example for spacing test
+            itemCode: '25',
+            netWeight: '500',
+            id: '3'
+          },
+        ];
+        setMasterData(prev => ({ ...prev, [selectedDate]: sample }));
+        setUploadError(null);
+      };
+
+      // --- Core AI Logic ---
+
+      // Helper: Resize Image to optimize upload speed and tokens
+      const resizeImage = (file, maxWidth = 1024, maxHeight = 1024) => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+              let width = img.width;
+              let height = img.height;
+
+              if (width > maxWidth || height > maxHeight) {
+                if (width > height) {
+                  height *= maxWidth / width;
+                  width = maxWidth;
+                } else {
+                  width *= maxHeight / height;
+                  height = maxHeight;
+                }
+              }
+
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL(file.type).split(',')[1]);
+            };
+            img.onerror = (err) => reject(new Error("Image load failed"));
+          };
+          reader.onerror = (err) => reject(new Error("File read failed"));
+        });
+      };
+
+      const analyzeSingleImage = async (file) => {
+        // 1. Resize Image
+        let base64Data;
+        try {
+          base64Data = await resizeImage(file);
+        } catch (e) {
+          console.warn("Resize failed, using original", e);
+          base64Data = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        }
+
+        const systemPrompt = `
+              You are a Bilingual Quality Assurance AI. Analyze the food label image.
+              TASK: Extract specific fields.
+              1. **PRODUCT NAME**: English AND Arabic brand/name.
+              2. **BATCH NUMBER**: Combine widely spaced chars (e.g. "2 5 d m" -> "25dm").
+              3. **DATES**: Production and Expiry.
+              4. **WEIGHT**: Net Weight.
+              RETURN JSON ONLY: { "productName": "string", "productionDate": "string", "expiryDate": "string", "batchNumber": "string", "netWeight": "string" }
+            `;
+
+        // List of models to try in order (Fallback mechanism)
+        const MODELS = [
+          "gemini-2.5-flash-preview-09-2025",
+          "gemini-2.5-flash-lite-preview-09-2025",
+          "gemini-1.5-flash"
+        ];
+
+        let lastError = null;
+
+        // Try each model
+        for (const model of MODELS) {
+          const urlBase = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+          let attempts = 0;
+          const maxAttempts = API_KEYS.length; // Try through keys once per model
+
+          while (attempts < maxAttempts) {
+            const currentKey = userApiKey || getCurrentKey();
+            const url = `${urlBase}?key=${currentKey}`;
+
+            try {
+              const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [
+                      { text: systemPrompt },
+                      { inlineData: { mimeType: file.type, data: base64Data } }
+                    ]
+                  }]
+                })
+              });
+
+              const result = await response.json();
+
+              if (result.error) {
+                const code = result.error.code;
+                const msg = (result.error.message || "").toLowerCase();
+
+                // Rate limit or Quota -> Rotate Key
+                if (code === 429 || msg.includes('quota') || msg.includes('rate limit')) {
+                  console.warn(`Key ...${currentKey.slice(-4)} exhausted on ${model}. Rotating.`);
+                  if (!userApiKey) getNextKey();
+                  attempts++;
+                  continue;
+                }
+
+                // Invalid Key -> Rotate Key
+                if ((code === 400 || code === 403) && !userApiKey) {
+                  console.warn(`Key ...${currentKey.slice(-4)} invalid on ${model}. Rotating.`);
+                  getNextKey();
+                  attempts++;
+                  continue;
+                }
+
+                // Model not found -> Break to next model
+                if (code === 404 || msg.includes('not found')) {
+                  throw new Error(`Model ${model} not found or inaccessible.`);
+                }
+
+                throw new Error(result.error.message);
+              }
+
+              const textResponse = result.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (!textResponse) throw new Error("AI returned empty response");
+
+              const cleanJson = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+              const parsed = JSON.parse(cleanJson);
+              if (!parsed || typeof parsed !== 'object') throw new Error("AI returned invalid JSON structure");
+
+              return parsed;
+
+            } catch (err) {
+              console.error(`Model ${model} attempt ${attempts + 1} failed: ${err.message}`);
+              lastError = err;
+
+              // Break loop if model is not found, so we move to next model
+              if (err.message.includes("Model") && err.message.includes("not found")) {
+                break;
+              }
+
+              attempts++;
+              await new Promise(r => setTimeout(r, 500)); // Backoff
+            }
+          }
+        }
+
+        throw new Error(`Analysis failed. Last error: ${lastError?.message || "Unknown error"}`);
+      };
+
+      const handleImagesUploadForTab = async (e, targetRecord) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        setIsProcessing(true);
+        setProcessingCount(files.length);
+        setErrorMsg(null);
+
+        // Process all images against the SPECIFIC target record of this tab
+        for (const file of files) {
+          try {
+            const extractedData = await analyzeSingleImage(file);
+            if (!extractedData) throw new Error("No data extracted from image.");
+            compareDataStrict(extractedData, file, targetRecord);
+          } catch (err) {
+            console.error(err);
+            setErrorMsg(prev => prev ? `${prev} | ${file.name}: ${err.message}` : `${file.name}: ${err.message}`);
+          } finally {
+            setProcessingCount(prev => Math.max(0, prev - 1));
+          }
+        }
+
+        setIsProcessing(false);
+      };
+
+      const compareDataStrict = (extracted, file, targetRecord) => {
+        if (!extracted) return;
+
+        const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]/g, '');
+
+        // Standardize AI Extracted Dates
+        const stdExtracted = {
+          ...extracted,
+          productionDate: parseDate(extracted.productionDate) || extracted.productionDate,
+          expiryDate: parseDate(extracted.expiryDate) || extracted.expiryDate
+        };
+
+        const scanId = Date.now() + Math.random();
+        const scanResult = {
+          id: scanId,
+          timestamp: new Date().toISOString(),
+          imageName: file.name,
+          targetProductId: targetRecord.id, // Link to specific master row
+          status: 'Pending',
+          extracted: stdExtracted,
+          rawExtracted: extracted,
+          matchedProductName: targetRecord.productNameEn,
+          discrepancies: []
+        };
+
+        // --- STRICT COMPARISON LOGIC ---
+        // Instead of finding a match, we assume the user selected the correct tab
+        // and we validate IF it matches that tab's data.
+
+        // 1. PRODUCT NAME: CHECK BUT DO NOT FLAG ERROR
+        // We simply record what was extracted.
+
+        // 2. Validate Other Fields
+        const compareField = (field, label, isDate = false) => {
+          const exp = targetRecord[field];
+          const act = stdExtracted[field];
+          const cleanExp = normalize(exp);
+          const cleanAct = normalize(act);
+
+          let isMismatch = false;
+
+          if (!act) {
+            isMismatch = true;
+            scanResult.discrepancies.push({
+              field,
+              expected: exp,
+              actual: 'Missing / Not Detected',
+              type: 'Missing Information'
+            });
+            return;
+          }
+
+          if (field === 'netWeight') {
+            const numsExp = cleanExp.replace(/\D/g, '');
+            const numsAct = cleanAct.replace(/\D/g, '');
+            // simple check: if expected numbers are found in actual string
+            if (numsExp !== numsAct && !cleanAct.includes(numsExp)) isMismatch = true;
+          } else if (cleanExp !== cleanAct) {
+            isMismatch = true;
+          }
+
+          if (isMismatch) {
+            scanResult.discrepancies.push({
+              field,
+              expected: exp,
+              actual: isDate ? act : extracted[field],
+              type: 'Mismatch'
+            });
+          }
+        };
+
+        compareField('expiryDate', 'Expiry Date', true);
+        compareField('productionDate', 'Production Date', true);
+        compareField('batchNumber', 'Batch Number');
+        compareField('netWeight', 'Net Weight');
+
+        scanResult.status = scanResult.discrepancies.length > 0 ? 'Mismatch' : 'Valid';
+
+        setScans(prev => [scanResult, ...prev]);
+      };
+
+      // --- UI Components ---
+
+      // PDF Generation Logic
+      const downloadReport = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        doc.setFontSize(18);
+        doc.text(`${config.title} - Daily Report`, 14, 22);
+        doc.setFontSize(11);
+        doc.text(`Date: ${selectedDate}`, 14, 30);
+
+        const todayScans = scans.filter(s => s.timestamp.startsWith(selectedDate));
+        const tableData = todayScans.map(s => [
+          new Date(s.timestamp).toLocaleTimeString(),
+          s.matchedProductName,
+          s.status,
+          s.discrepancies.map(d => `${d.field}: ${d.actual}`).join(', ') || 'None'
+        ]);
+
+        doc.autoTable({
+          startY: 40,
+          head: [['Time', 'Product', 'Status', 'Discrepancies']],
+          body: tableData,
+          theme: 'grid',
+          headStyles: { fillColor: [16, 185, 129] } // Emerald-600
+        });
+
+        doc.save(`LabelGuard_Report_${selectedDate}.pdf`);
+      };
+
+      const downloadFullHistory = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.text("Full Historical Record", 14, 20);
+        const allData = scans.map(s => [
+          s.timestamp.split('T')[0],
+          s.matchedProductName,
+          s.status,
+          s.discrepancies.length
+        ]);
+        doc.autoTable({
+          startY: 30,
+          head: [['Date', 'Product', 'Status', 'Errors']],
+          body: allData,
+        });
+        doc.save('LabelGuard_History_Full.pdf');
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-100 font-sans text-slate-900">
+          <Navbar
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+          />
+
+          <div className="flex flex-col md:flex-row h-full">
+            {/* Sidebar Nav (Mobile Friendly) */}
+            <div className={`md:w-64 bg-white border-r border-slate-200 p-4 space-y-2 flex-shrink-0 ${window.innerWidth < 768 ? 'w-full flex justify-between' : ''} md:block`}>
+              <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'dashboard' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
+                <ScanLine size={20} /> <span className="hidden md:inline">Dashboard</span>
+              </button>
+              <button onClick={() => setActiveTab('masterData')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'masterData' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
+                <FileSpreadsheet size={20} /> <span className="hidden md:inline">Master Data</span>
+              </button>
+              <button onClick={() => setActiveTab('verify')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'verify' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
+                <CheckCircle size={20} /> <span className="hidden md:inline">Verify Labels</span>
+              </button>
+              <button onClick={() => setActiveTab('reports')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'reports' ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
+                <History size={20} /> <span className="hidden md:inline">Reports</span>
+              </button>
+            </div>
+
+            {/* Main Content */}
+            <div className="flex-1 overflow-auto h-[calc(100vh-64px)] pb-10">
+              {activeTab === 'dashboard' && (
+                <Dashboard
+                  scans={scans}
+                  masterData={masterData}
+                  selectedDate={selectedDate}
+                  config={config}
+                  setConfig={setConfig}
+                  userApiKey={userApiKey}
+                  setUserApiKey={setUserApiKey}
+                  downloadReport={downloadReport}
+                  downloadFullHistory={downloadFullHistory}
+                />
+              )}
+              {activeTab === 'masterData' && (
+                <MasterDataView
+                  masterData={masterData}
+                  selectedDate={selectedDate}
+                  loadSampleMasterData={loadSampleMasterData}
+                  handleFileUpload={handleFileUpload}
+                  uploadError={uploadError}
+                  config={config}
+                />
+              )}
+              {activeTab === 'verify' && (
+                <VerifyView
+                  scans={scans}
+                  masterData={masterData}
+                  selectedDate={selectedDate}
+                  activeProductTabId={activeProductTabId}
+                  setActiveProductTabId={setActiveProductTabId}
+                  isProcessing={isProcessing}
+                  processingCount={processingCount}
+                  handleImagesUploadForTab={handleImagesUploadForTab}
+                  errorMsg={errorMsg}
+                  config={config}
+                />
+              )}
+              {activeTab === 'reports' && (
+                <ReportsView
+                  scans={scans}
+                  masterData={masterData}
+                  selectedDate={selectedDate}
+                  config={config}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<FoodLabelVerifier />);
+  </script>
+</body>
+
+</html>
