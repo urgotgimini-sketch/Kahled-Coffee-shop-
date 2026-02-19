@@ -1062,7 +1062,14 @@
       const compareDataStrict = (extracted, file, targetRecord) => {
         if (!extracted) return;
 
-        const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]/g, '');
+        const normalize = (str, isBatch = false) => {
+          let s = (str || '').toLowerCase().trim();
+          if (isBatch) {
+            // Remove common prefixes like "bn:", "batch:", "lot:", etc.
+            s = s.replace(/^(b\.?n\.?|batch|lot)\s*[:.\-]?\s*/i, '');
+          }
+          return s.replace(/[^a-z0-9\u0600-\u06FF]/g, '');
+        };
 
         // Standardize AI Extracted Dates
         const stdExtracted = {
@@ -1095,8 +1102,9 @@
         const compareField = (field, label, isDate = false) => {
           const exp = targetRecord[field];
           const act = stdExtracted[field];
-          const cleanExp = normalize(exp);
-          const cleanAct = normalize(act);
+          const isBatch = field === 'batchNumber';
+          const cleanExp = normalize(exp, isBatch);
+          const cleanAct = normalize(act, isBatch);
 
           let isMismatch = false;
 
